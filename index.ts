@@ -886,15 +886,16 @@ function decodeScalar25519(n: Hex): bigint {
 
 // Private convenience method
 // RFC8032 5.1.5
-async function getExtendedPublicKey(key: PrivKey) {
+async function getExtendedPublicKey(privKey: PrivKey, pubKey?: PubKey) {
   // Normalize bigint / number / string to Uint8Array
-  key =
-    typeof key === 'bigint' || typeof key === 'number'
-      ? numberTo32BytesBE(normalizeScalar(key, MAX_256B))
-      : ensureBytes(key);
-  if (key.length !== 32) throw new Error(`Expected 32 bytes`);
+  privKey =
+    typeof privKey === 'bigint' || typeof privKey === 'number'
+      ? numberTo32BytesBE(normalizeScalar(privKey, MAX_256B))
+      : ensureBytes(privKey);
+  if (privKey.length !== 32) throw new Error(`Expected 32 bytes`);
+
   // hash to produce 64 bytes
-  const hashed = await utils.sha512(key);
+  const hashed = await utils.sha512(privKey);
   // First 32 bytes of 64b uniformingly random input are taken,
   // clears 3 bits of it to produce a random field element.
   const head = adjustBytes25519(hashed.slice(0, 32));
@@ -903,9 +904,9 @@ async function getExtendedPublicKey(key: PrivKey) {
   // The actual private scalar
   const scalar = mod(bytesToNumberLE(head), CURVE.l);
   // Point on Edwards curve aka public key
-  const point = Point.BASE.multiply(scalar);
-  const pointBytes = point.toRawBytes();
-  return { head, prefix, scalar, point, pointBytes };
+  if (pubKey != null && !(pubKey instanceof Point)) pubKey = Point.fromHex(pubKey, false);
+  const point = pubKey == null ? Point.BASE.multiply(scalar) : pubKey;
+  return { head, prefix, scalar, point };
 }
 
 //
@@ -916,19 +917,19 @@ async function getExtendedPublicKey(key: PrivKey) {
  * RFC8032 5.1.5
  */
 export async function getPublicKey(privateKey: PrivKey): Promise<Uint8Array> {
-  return (await getExtendedPublicKey(privateKey)).pointBytes;
+  return (await getExtendedPublicKey(privateKey)).point.toRawBytes();
 }
 
 /**
  * Signs message with privateKey.
  * RFC8032 5.1.6
  */
-export async function sign(message: Hex, privateKey: Hex): Promise<Uint8Array> {
+export async function sign(message: Hex, privateKey: Hex, publicKey?: Hex): Promise<Uint8Array> {
   message = ensureBytes(message);
-  const { prefix, scalar, pointBytes } = await getExtendedPublicKey(privateKey);
+  const { prefix, scalar, point } = await getExtendedPublicKey(privateKey, publicKey);
   const r = await sha512ModqLE(prefix, message); // r = hash(prefix + msg)
   const R = Point.BASE.multiply(r); // R = rG
-  const k = await sha512ModqLE(R.toRawBytes(), pointBytes, message); // k = hash(R + P + msg)
+  const k = await sha512ModqLE(R.toRawBytes(), point.toRawBytes(), message); // k = hash(R + P + msg)
   const s = mod(r + k * scalar, CURVE.l); // s = r + kp
   return new Signature(R, s).toRawBytes();
 }

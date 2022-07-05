@@ -57,6 +57,11 @@ run(async () => {
     return sigHex;
   });
 
+  await mark('signWithPublicKey', 2000, async () => {
+    sigHex = await ed.sign(msg, priv2, pubHex);
+    return sigHex;
+  });
+
   await mark('verify', 400, async () => {
     return await ed.verify(sigHex, msg, pubHex);
   });
